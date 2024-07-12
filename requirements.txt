@@ -3,3 +3,4 @@ crewai
 crewai-tools
 chromadb
 toml
+embedchain
