@@ -1,24 +1,8 @@
 import streamlit as st
 from crewai import Agent, Task, Crew, Process
-from crewai_tools import SerperDevTool, FileReadTool, FileWriteTool
 
 # Define a dictionary of available crewAI examples
 crewai_examples = {
-  "Prepare for meetings": {
-      "description": "Prepare for your next meeting by summarizing documents and generating key talking points.",
-      "agents": ["Researcher", "Analyst", "Writer"],
-      "tasks": ["Summarize Document", "Analyze Trends", "Generate Talking Points"],
-  },
-  "Trip Planner Crew": {
-      "description": "Plan your next trip with the help of AI agents who can find flights, hotels, and activities.",
-      "agents": ["Travel Agent", "Researcher", "Budget Analyst"],
-      "tasks": ["Find Flights", "Find Hotels", "Find Activities", "Calculate Budget"],
-  },
-  "Create Instagram Post": {
-      "description": "Generate an engaging Instagram post with relevant hashtags and captions.",
-      "agents": ["Content Creator", "Image Editor", "Hashtag Generator"],
-      "tasks": ["Write Caption", "Edit Image", "Generate Hashtags"],
-  },
   "Marketing Campaign": {
       "description": "Generate a marketing plan, target audience research, and ad copy.",
       "agents": [
@@ -34,14 +18,15 @@ crewai_examples = {
           "Create Campaign Schedule",
       ],
   },
+  # Add more examples as needed
 }
 
 # Create the Streamlit app
 st.title("Run crewAI Examples")
 
 # API Key inputs
-serper_api_key = st.text_input("Enter your Serper API Key", type="password")
 openai_api_key = st.text_input("Enter your OpenAI API Key", type="password")
+serper_api_key = st.text_input("Enter your Serper API Key", type="password")
 
 # Select an example
 selected_example = st.selectbox("Select a crewAI example", list(crewai_examples.keys()))
@@ -53,47 +38,17 @@ st.write(f"**Description:** {crewai_examples[selected_example]['description']}")
 inputs = {}
 for task in crewai_examples[selected_example]["tasks"]:
   input_label = f"Input for {task}:"
-  inputs[task] = st.text_area(input_label)
+  inputs[task] = st.text_area(input_label, value="Enter your input here...")
 
 # Run the selected example
 if st.button("Run Example"):
-  if not serper_api_key or not openai_api_key:
-      st.error("Please enter both Serper and OpenAI API keys.")
+  if not openai_api_key or not serper_api_key:
+      st.error("Please enter both API keys to proceed.")
   else:
-      # Instantiate tools with API keys
-      search_tool = SerperDevTool(api_key=serper_api_key)
-      file_read_tool = FileReadTool()
-      file_write_tool = FileWriteTool()
-
       # Create agents dynamically based on selected example
       agents = []
       for agent_role in crewai_examples[selected_example]["agents"]:
-          if agent_role == "Market Researcher":
-              agents.append(
-                  Agent(
-                      role=agent_role,
-                      goal=f"Perform {agent_role} tasks.",
-                      tools=[search_tool],
-                  )
-              )
-          elif agent_role == "Content Writer":
-              agents.append(
-                  Agent(
-                      role=agent_role,
-                      goal=f"Perform {agent_role} tasks.",
-                      tools=[file_read_tool],
-                  )
-              )
-          elif agent_role == "Campaign Manager":
-              agents.append(
-                  Agent(
-                      role=agent_role,
-                      goal=f"Perform {agent_role} tasks.",
-                      tools=[file_write_tool],
-                  )
-              )
-          else:
-              agents.append(Agent(role=agent_role, goal=f"Perform {agent_role} tasks."))
+          agents.append(Agent(role=agent_role, goal=f"Perform {agent_role} tasks."))
 
       # Create tasks dynamically based on selected example and user inputs
       tasks = []
@@ -101,9 +56,7 @@ if st.button("Run Example"):
           tasks.append(
               Task(
                   description=f"{task_name}: {user_input}",
-                  agent=agents[
-                      crewai_examples[selected_example]["agents"].index(agent_role)
-                  ],
+                  agent=agents[crewai_examples[selected_example]["agents"].index(agent_role)],
               )
           )
 
@@ -113,12 +66,15 @@ if st.button("Run Example"):
           tasks=tasks, 
           process=Process.sequential,
           verbose=True,
-          config={"openai_api_key": openai_api_key}
+          config={
+              "openai_api_key": openai_api_key,
+              "serper_api_key": serper_api_key
+          }
       )
 
       # Kick off the crew
       try:
-          with st.spinner("Running CrewAI..."):
+          with st.spinner("Processing..."):
               result = crew.kickoff()
 
           # Display the results
