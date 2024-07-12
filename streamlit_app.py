@@ -34,11 +34,14 @@ crewai_examples = {
           "Create Campaign Schedule",
       ],
   },
-  # Add more examples as needed
 }
 
 # Create the Streamlit app
 st.title("Run crewAI Examples")
+
+# API Key inputs
+serper_api_key = st.text_input("Enter your Serper API Key", type="password")
+openai_api_key = st.text_input("Enter your OpenAI API Key", type="password")
 
 # Select an example
 selected_example = st.selectbox("Select a crewAI example", list(crewai_examples.keys()))
@@ -50,100 +53,77 @@ st.write(f"**Description:** {crewai_examples[selected_example]['description']}")
 inputs = {}
 for task in crewai_examples[selected_example]["tasks"]:
   input_label = f"Input for {task}:"
-  if task == "Generate Marketing Plan":
-      inputs[task] = st.text_area(
-          input_label,
-          value="""
-              Product: AI-powered Marketing Assistant
-              Campaign Goals: Increase brand awareness and generate leads
-              Budget: \$10,000
-              Timeline: 3 months
-              """,
-      )
-  elif task == "Research Target Audience":
-      inputs[task] = st.text_area(
-          input_label,
-          value="""
-              Describe the ideal customer for an AI-powered Marketing Assistant.
-              """,
-      )
-  elif task == "Write Ad Copy":
-      inputs[task] = st.text_area(
-          input_label,
-          value="""
-              Write compelling ad copy for an AI-powered Marketing Assistant 
-              targeting marketing professionals. 
-              """,
-      )
-  elif task == "Create Campaign Schedule":
-      inputs[task] = st.text_area(
-          input_label,
-          value="""
-              Create a 3-month campaign schedule outlining the key activities 
-              for promoting an AI-powered Marketing Assistant.
-              """,
-      )
-  else:
-      inputs[task] = st.text_area(input_label)
+  inputs[task] = st.text_area(input_label)
 
 # Run the selected example
 if st.button("Run Example"):
-  # Instantiate tools
-  search_tool = SerperDevTool()
-  file_read_tool = FileReadTool()
-  file_write_tool = FileWriteTool()
+  if not serper_api_key or not openai_api_key:
+      st.error("Please enter both Serper and OpenAI API keys.")
+  else:
+      # Instantiate tools with API keys
+      search_tool = SerperDevTool(api_key=serper_api_key)
+      file_read_tool = FileReadTool()
+      file_write_tool = FileWriteTool()
 
-  # Create agents dynamically based on selected example
-  agents = []
-  for agent_role in crewai_examples[selected_example]["agents"]:
-      if agent_role == "Market Researcher":
-          agents.append(
-              Agent(
-                  role=agent_role,
-                  goal=f"Perform {agent_role} tasks.",
-                  tools=[search_tool],
+      # Create agents dynamically based on selected example
+      agents = []
+      for agent_role in crewai_examples[selected_example]["agents"]:
+          if agent_role == "Market Researcher":
+              agents.append(
+                  Agent(
+                      role=agent_role,
+                      goal=f"Perform {agent_role} tasks.",
+                      tools=[search_tool],
+                  )
               )
-          )
-      elif agent_role == "Content Writer":
-          agents.append(
-              Agent(
-                  role=agent_role,
-                  goal=f"Perform {agent_role} tasks.",
-                  tools=[file_read_tool],
+          elif agent_role == "Content Writer":
+              agents.append(
+                  Agent(
+                      role=agent_role,
+                      goal=f"Perform {agent_role} tasks.",
+                      tools=[file_read_tool],
+                  )
               )
-          )
-      elif agent_role == "Campaign Manager":
-          agents.append(
-              Agent(
-                  role=agent_role,
-                  goal=f"Perform {agent_role} tasks.",
-                  tools=[file_write_tool],
+          elif agent_role == "Campaign Manager":
+              agents.append(
+                  Agent(
+                      role=agent_role,
+                      goal=f"Perform {agent_role} tasks.",
+                      tools=[file_write_tool],
+                  )
               )
-          )
-      else:
-          agents.append(Agent(role=agent_role, goal=f"Perform {agent_role} tasks."))
+          else:
+              agents.append(Agent(role=agent_role, goal=f"Perform {agent_role} tasks."))
 
-  # Create tasks dynamically based on selected example and user inputs
-  tasks = []
-  for task_name, user_input in inputs.items():
-      agent = next((a for a in agents if a.role in task_name), agents[0])
-      tasks.append(
-          Task(
-              description=f"{task_name}: {user_input}",
-              agent=agent,
+      # Create tasks dynamically based on selected example and user inputs
+      tasks = []
+      for task_name, user_input in inputs.items():
+          tasks.append(
+              Task(
+                  description=f"{task_name}: {user_input}",
+                  agent=agents[
+                      crewai_examples[selected_example]["agents"].index(agent_role)
+                  ],
+              )
           )
+
+      # Instantiate the crew with a sequential process
+      crew = Crew(
+          agents=agents, 
+          tasks=tasks, 
+          process=Process.sequential,
+          verbose=True,
+          config={"openai_api_key": openai_api_key}
       )
 
-  # Instantiate the crew with a sequential process
-  crew = Crew(agents=agents, tasks=tasks, process=Process.sequential)
+      # Kick off the crew
+      try:
+          with st.spinner("Running CrewAI..."):
+              result = crew.kickoff()
 
-  # Kick off the crew
-  try:
-      result = crew.kickoff()
+          # Display the results
+          st.write("**Results:**")
+          st.write(result)
 
-      # Display the results
-      st.write("**Results:**")
-      st.write(result)
-
-  except Exception as e:
-      st.error(f"An error occurred: {e}")
+      except Exception as e:
+          st.error(f"An error occurred: {str(e)}")
