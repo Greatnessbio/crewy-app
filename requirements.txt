@@ -1,3 +1,5 @@
 streamlit
 crewai
-langchain
+crewai-tools
+chromadb
+toml
