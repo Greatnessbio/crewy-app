@@ -1,6 +1,5 @@
 import streamlit as st
 import requests
-import json
 from streamlit.logger import get_logger
 from crewai import Agent, Task, Crew, Process
 from langchain_openai import ChatOpenAI
@@ -10,7 +9,7 @@ LOGGER = get_logger(__name__)
 def load_api_keys():
     try:
         return {
-            "openrouter": st.secrets["secrets"]["openrouter_api_key"],
+            "openai": st.secrets["secrets"]["openai_api_key"],
             "rapidapi": st.secrets["secrets"]["rapidapi_key"]
         }
     except KeyError as e:
@@ -26,7 +25,7 @@ def login(username, password):
         return True
     return False
 
-def get_company_info(company_url, rapidapi_key):
+def get_linkedin_company_data(company_url, rapidapi_key):
     url = "https://linkedin-data-scraper.p.rapidapi.com/company_pro"
     payload = {"link": company_url}
     headers = {
@@ -39,11 +38,11 @@ def get_company_info(company_url, rapidapi_key):
         response.raise_for_status()
         return response.json()
     except requests.RequestException as e:
-        LOGGER.error(f"Company info API request failed: {e}")
-        st.error("Failed to fetch company information. Please try again later.")
+        LOGGER.error(f"LinkedIn company data request failed: {e}")
+        st.error("Failed to fetch company information. Please try again.")
     return None
 
-def get_company_posts(company_url, rapidapi_key):
+def get_linkedin_company_posts(company_url, rapidapi_key):
     url = "https://linkedin-data-scraper.p.rapidapi.com/company_updates"
     payload = {
         "company_url": company_url,
@@ -61,80 +60,83 @@ def get_company_posts(company_url, rapidapi_key):
         response.raise_for_status()
         return response.json()
     except requests.RequestException as e:
-        LOGGER.error(f"Company posts API request failed: {e}")
-        st.error("Failed to fetch company posts. Please try again later.")
+        LOGGER.error(f"LinkedIn company posts request failed: {e}")
+        st.error("Failed to fetch company posts. Please try again.")
     return None
 
-def analyze_text(text, prompt, api_key):
-    try:
-        response = requests.post(
-            url="https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={
-                "model": "anthropic/claude-3-sonnet-20240229",
-                "messages": [
-                    {"role": "system", "content": "You are an expert in content analysis and creation."},
-                    {"role": "user", "content": prompt + "\n\n" + text}
-                ]
-            },
-            timeout=30
-        )
-        response.raise_for_status()
-        return response.json()['choices'][0]['message']['content']
-    except requests.RequestException as e:
-        LOGGER.error(f"OpenRouter API request failed: {e}")
-        return f"Error: Failed to generate analysis. Please try again later. Details: {str(e)}"
-    except (KeyError, IndexError, ValueError) as e:
-        LOGGER.error(f"Error processing OpenRouter API response: {e}")
-        return f"Error: Failed to process the generated content. Please try again. Details: {str(e)}"
+def create_agents(api_keys):
+    llm = ChatOpenAI(model="gpt-4", api_key=api_keys["openai"])
+
+    researcher = Agent(
+        role='Senior Research Analyst',
+        goal='Discover and analyze company information from LinkedIn',
+        backstory="""You're a senior research analyst specializing in company analysis.
+        Your expertise lies in extracting valuable insights from company profiles and posts.""",
+        verbose=True,
+        allow_delegation=False,
+        llm=llm
+    )
+
+    writer = Agent(
+        role='Content Strategist',
+        goal='Analyze content strategy and provide actionable insights',
+        backstory="""You're an experienced content strategist with a knack for understanding
+        B2B communication strategies on LinkedIn. Your analyses help companies improve their content.""",
+        verbose=True,
+        allow_delegation=False,
+        llm=llm
+    )
+
+    return [researcher, writer]
 
 def main_app():
-    st.title("LinkedIn Company Analysis")
+    st.title("Digital Marketing Competitor Analysis Tool")
 
     api_keys = load_api_keys()
     if not api_keys:
         return
 
-    company_url = st.text_input("Enter LinkedIn Company URL:")
+    agents = create_agents(api_keys)
 
-    if st.button("Analyze Company"):
+    company_url = st.text_input("Enter competitor's LinkedIn Company URL:")
+    
+    if st.button("Analyze Competitor"):
         if company_url:
-            with st.spinner("Fetching company information..."):
-                company_info = get_company_info(company_url, api_keys["rapidapi"])
-                if company_info:
-                    st.success("Company information fetched successfully!")
-                    st.json(company_info)
+            with st.spinner("Analyzing competitor data..."):
+                company_data = get_linkedin_company_data(company_url, api_keys["rapidapi"])
+                company_posts = get_linkedin_company_posts(company_url, api_keys["rapidapi"])
+
+                if company_data and company_posts:
+                    st.success("Data fetched successfully!")
+                    
+                    research_task = Task(
+                        description=f"Analyze the LinkedIn profile and recent posts of the company at {company_url}. Focus on their industry positioning, key offerings, and overall online presence.",
+                        agent=agents[0]
+                    )
+
+                    content_task = Task(
+                        description="Based on the research, provide a detailed content strategy analysis. Include insights on post frequency, engagement rates, content themes, and areas for improvement.",
+                        agent=agents[1]
+                    )
+
+                    crew = Crew(
+                        agents=agents,
+                        tasks=[research_task, content_task],
+                        verbose=2,
+                        process=Process.sequential
+                    )
+
+                    result = crew.kickoff()
+                    
+                    st.subheader("Analysis Results")
+                    st.write(result)
+
+                    with st.expander("Raw Company Data"):
+                        st.json(company_data)
+                    with st.expander("Raw Company Posts"):
+                        st.json(company_posts)
                 else:
-                    st.error("Failed to fetch company information. Please try again.")
-                    return
-
-            with st.spinner("Fetching company posts..."):
-                company_posts = get_company_posts(company_url, api_keys["rapidapi"])
-                if company_posts:
-                    st.success("Company posts fetched successfully!")
-                    st.json(company_posts)
-                else:
-                    st.error("Failed to fetch company posts. Please try again.")
-                    return
-
-            with st.spinner("Analyzing company profile..."):
-                profile_analysis = analyze_text(
-                    json.dumps(company_info),
-                    "Analyze the company's LinkedIn profile based on the provided data.",
-                    api_keys["openrouter"]
-                )
-                st.subheader("Company Profile Analysis")
-                st.write(profile_analysis)
-
-            with st.spinner("Analyzing company posts..."):
-                posts_analysis = analyze_text(
-                    json.dumps(company_posts),
-                    "Analyze the company's LinkedIn posts based on the provided data.",
-                    api_keys["openrouter"]
-                )
-                st.subheader("Company Posts Analysis")
-                st.write(posts_analysis)
-
+                    st.error("Failed to fetch company data. Please try again.")
         else:
             st.warning("Please enter a LinkedIn Company URL.")
 
