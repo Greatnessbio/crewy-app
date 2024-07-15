@@ -1,36 +1,56 @@
 import streamlit as st
-from transformers import WhisperProcessor, WhisperForConditionalGeneration
-import torch
+import assemblyai as aai
 
-# Load the Whisper model and processor
-processor = WhisperProcessor.from_pretrained("openai/whisper-base")
-model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-base")
+# Streamlit app title
+st.title("Audio Transcription with AssemblyAI")
 
-def transcribe_audio(audio_file):
-    # Load the audio file
-    audio, sr = torchaudio.load(audio_file)
+# API key input
+api_key = st.text_input("Enter your AssemblyAI API key:", type="password")
 
-    # Preprocess the audio
-    inputs = processor(audio, sampling_rate=sr, return_tensors="pt")
+if api_key:
+    aai.settings.api_key = api_key
 
-    # Run the model
-    generated_ids = model.generate(**inputs)
-    transcription = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+    # File uploader
+    uploaded_file = st.file_uploader("Choose an audio file", type=["mp3", "wav", "m4a"])
 
-    return transcription
+    if uploaded_file is not None:
+        st.audio(uploaded_file)
 
-def main():
-    st.title("Audio Transcription App")
-    st.write("Upload an audio file and it will be transcribed using the Whisper model.")
+        # Transcription options
+        st.subheader("Transcription Options")
+        speaker_labels = st.checkbox("Enable Speaker Diarization")
 
-    audio_file = st.file_uploader("Upload your audio file", type=["wav", "mp3", "ogg"])
-    if audio_file is not None:
-        # Transcribe the audio file
-        transcription = transcribe_audio(audio_file)
+        if st.button("Transcribe"):
+            with st.spinner("Transcribing..."):
+                try:
+                    transcriber = aai.Transcriber()
+                    config = aai.TranscriptionConfig(speaker_labels=speaker_labels)
+                    
+                    # Save uploaded file temporarily and get its path
+                    with open(uploaded_file.name, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    
+                    transcript = transcriber.transcribe(uploaded_file.name, config)
 
-        # Display the transcription
-        st.header("Transcription")
-        st.write(transcription)
+                    st.subheader("Transcription Result")
+                    st.write(transcript.text)
 
-if __name__ == "__main__":
-    main()
+                    if speaker_labels and transcript.utterances:
+                        st.subheader("Speaker Diarization")
+                        for utterance in transcript.utterances:
+                            st.write(f"Speaker {utterance.speaker}: {utterance.text}")
+                
+                except Exception as e:
+                    st.error(f"An error occurred: {str(e)}")
+                
+                finally:
+                    # Clean up the temporary file
+                    import os
+                    if os.path.exists(uploaded_file.name):
+                        os.remove(uploaded_file.name)
+
+else:
+    st.warning("Please enter your AssemblyAI API key to proceed.")
+
+st.markdown("---")
+st.markdown("Powered by AssemblyAI")
