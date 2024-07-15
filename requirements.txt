@@ -1,5 +1,8 @@
 streamlit
-requests
-crewai
-langchain
-langchain-openai
+websockets
+asyncio
+base64
+json
+pyaudio
+os
+pathlib
