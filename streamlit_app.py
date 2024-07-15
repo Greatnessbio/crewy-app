@@ -1,169 +1,148 @@
 import streamlit as st
-import requests
-from streamlit.logger import get_logger
-from crewai import Agent, Task, Crew, Process
-from langchain_openai import ChatOpenAI
+import websockets
+import asyncio
+import base64
+import json
+import pyaudio
+import os
+from pathlib import Path
 
-LOGGER = get_logger(__name__)
+# Session state
+if 'text' not in st.session_state:
+	st.session_state['text'] = 'Listening...'
+	st.session_state['run'] = False
 
-def load_api_keys():
-    try:
-        return {
-            "openai": st.secrets["secrets"]["openai_api_key"],
-            "rapidapi": st.secrets["secrets"]["rapidapi_key"]
-        }
-    except KeyError as e:
-        st.error(f"{e} API key not found in secrets.toml. Please add it.")
-        return None
+# Audio parameters 
+st.sidebar.header('Audio Parameters')
 
-def load_users():
-    return st.secrets["users"]
+FRAMES_PER_BUFFER = int(st.sidebar.text_input('Frames per buffer', 3200))
+FORMAT = pyaudio.paInt16
+CHANNELS = 1
+RATE = int(st.sidebar.text_input('Rate', 16000))
+p = pyaudio.PyAudio()
 
-def login(username, password):
-    users = load_users()
-    if username in users and users[username] == password:
-        return True
-    return False
+# Open an audio stream with above parameter settings
+stream = p.open(
+   format=FORMAT,
+   channels=CHANNELS,
+   rate=RATE,
+   input=True,
+   frames_per_buffer=FRAMES_PER_BUFFER
+)
 
-def get_linkedin_company_data(company_url, rapidapi_key):
-    url = "https://linkedin-data-scraper.p.rapidapi.com/company_pro"
-    payload = {"link": company_url}
-    headers = {
-        "x-rapidapi-key": rapidapi_key,
-        "x-rapidapi-host": "linkedin-data-scraper.p.rapidapi.com",
-        "Content-Type": "application/json"
-    }
-    try:
-        response = requests.post(url, json=payload, headers=headers)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        LOGGER.error(f"LinkedIn company data request failed: {e}")
-        st.error("Failed to fetch company information. Please try again.")
-    return None
+# Start/stop audio transmission
+def start_listening():
+	st.session_state['run'] = True
 
-def get_linkedin_company_posts(company_url, rapidapi_key):
-    url = "https://linkedin-data-scraper.p.rapidapi.com/company_updates"
-    payload = {
-        "company_url": company_url,
-        "posts": 20,
-        "comments": 10,
-        "reposts": 10
-    }
-    headers = {
-        "x-rapidapi-key": rapidapi_key,
-        "x-rapidapi-host": "linkedin-data-scraper.p.rapidapi.com",
-        "Content-Type": "application/json"
-    }
-    try:
-        response = requests.post(url, json=payload, headers=headers)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        LOGGER.error(f"LinkedIn company posts request failed: {e}")
-        st.error("Failed to fetch company posts. Please try again.")
-    return None
+def download_transcription():
+	read_txt = open('transcription.txt', 'r')
+	st.download_button(
+		label="Download transcription",
+		data=read_txt,
+		file_name='transcription_output.txt',
+		mime='text/plain')
 
-def create_agents(api_keys):
-    llm = ChatOpenAI(model="gpt-4", api_key=api_keys["openai"])
+def stop_listening():
+	st.session_state['run'] = False
 
-    researcher = Agent(
-        role='Senior Research Analyst',
-        goal='Discover and analyze company information from LinkedIn',
-        backstory="""You're a senior research analyst specializing in company analysis.
-        Your expertise lies in extracting valuable insights from company profiles and posts.""",
-        verbose=True,
-        allow_delegation=False,
-        llm=llm
-    )
+# Web user interface
+st.title('🎙️ Real-Time Transcription App')
 
-    writer = Agent(
-        role='Content Strategist',
-        goal='Analyze content strategy and provide actionable insights',
-        backstory="""You're an experienced content strategist with a knack for understanding
-        B2B communication strategies on LinkedIn. Your analyses help companies improve their content.""",
-        verbose=True,
-        allow_delegation=False,
-        llm=llm
-    )
+with st.expander('About this App'):
+	st.markdown('''
+	This Streamlit app uses the AssemblyAI API to perform real-time transcription.
+	
+	Libraries used:
+	- `streamlit` - web framework
+	- `pyaudio` - a Python library providing bindings to [PortAudio](http://www.portaudio.com/) (cross-platform audio processing library)
+	- `websockets` - allows interaction with the API
+	- `asyncio` - allows concurrent input/output processing
+	- `base64` - encode/decode audio data
+	- `json` - allows reading of AssemblyAI audio output in JSON format
+	''')
 
-    return [researcher, writer]
+col1, col2 = st.columns(2)
 
-def main_app():
-    st.title("Digital Marketing Competitor Analysis Tool")
+col1.button('Start', on_click=start_listening)
+col2.button('Stop', on_click=stop_listening)
 
-    api_keys = load_api_keys()
-    if not api_keys:
-        return
+# Send audio (Input) / Receive transcription (Output)
+async def send_receive():
+	URL = f"wss://api.assemblyai.com/v2/realtime/ws?sample_rate={RATE}"
 
-    agents = create_agents(api_keys)
+	print(f'Connecting websocket to url ${URL}')
 
-    company_url = st.text_input("Enter competitor's LinkedIn Company URL:")
-    
-    if st.button("Analyze Competitor"):
-        if company_url:
-            with st.spinner("Analyzing competitor data..."):
-                company_data = get_linkedin_company_data(company_url, api_keys["rapidapi"])
-                company_posts = get_linkedin_company_posts(company_url, api_keys["rapidapi"])
+	async with websockets.connect(
+		URL,
+		extra_headers=(("Authorization", st.secrets['api_key']),),
+		ping_interval=5,
+		ping_timeout=20
+	) as _ws:
 
-                if company_data and company_posts:
-                    st.success("Data fetched successfully!")
-                    
-                    research_task = Task(
-                        description=f"Analyze the LinkedIn profile and recent posts of the company at {company_url}. Focus on their industry positioning, key offerings, and overall online presence.",
-                        agent=agents[0]
-                    )
+		r = await asyncio.sleep(0.1)
+		print("Receiving messages ...")
 
-                    content_task = Task(
-                        description="Based on the research, provide a detailed content strategy analysis. Include insights on post frequency, engagement rates, content themes, and areas for improvement.",
-                        agent=agents[1]
-                    )
+		session_begins = await _ws.recv()
+		print(session_begins)
+		print("Sending messages ...")
 
-                    crew = Crew(
-                        agents=agents,
-                        tasks=[research_task, content_task],
-                        verbose=2,
-                        process=Process.sequential
-                    )
 
-                    result = crew.kickoff()
-                    
-                    st.subheader("Analysis Results")
-                    st.write(result)
+		async def send():
+			while st.session_state['run']:
+				try:
+					data = stream.read(FRAMES_PER_BUFFER)
+					data = base64.b64encode(data).decode("utf-8")
+					json_data = json.dumps({"audio_data":str(data)})
+					r = await _ws.send(json_data)
 
-                    with st.expander("Raw Company Data"):
-                        st.json(company_data)
-                    with st.expander("Raw Company Posts"):
-                        st.json(company_posts)
-                else:
-                    st.error("Failed to fetch company data. Please try again.")
-        else:
-            st.warning("Please enter a LinkedIn Company URL.")
+				except websockets.exceptions.ConnectionClosedError as e:
+					print(e)
+					assert e.code == 4008
+					break
 
-def login_page():
-    st.title("Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        if login(username, password):
-            st.session_state.logged_in = True
-            st.success("Logged in successfully!")
-            st.rerun()
-        else:
-            st.error("Invalid username or password")
+				except Exception as e:
+					print(e)
+					assert False, "Not a websocket 4008 error"
 
-def display():
-    if 'logged_in' not in st.session_state:
-        st.session_state.logged_in = False
+				r = await asyncio.sleep(0.01)
 
-    if not st.session_state.logged_in:
-        login_page()
-    else:
-        if st.sidebar.button("Logout"):
-            st.session_state.logged_in = False
-            st.rerun()
-        else:
-            main_app()
 
-if __name__ == "__main__":
-    display()
+		async def receive():
+			while st.session_state['run']:
+				try:
+					result_str = await _ws.recv()
+					result = json.loads(result_str)['text']
+
+					if json.loads(result_str)['message_type']=='FinalTranscript':
+						print(result)
+						st.session_state['text'] = result
+						st.write(st.session_state['text'])
+
+						transcription_txt = open('transcription.txt', 'a')
+						transcription_txt.write(st.session_state['text'])
+						transcription_txt.write(' ')
+						transcription_txt.close()
+
+
+				except websockets.exceptions.ConnectionClosedError as e:
+					print(e)
+					assert e.code == 4008
+					break
+
+				except Exception as e:
+					print(e)
+					assert False, "Not a websocket 4008 error"
+			
+		send_result, receive_result = await asyncio.gather(send(), receive())
+
+
+asyncio.run(send_receive())
+
+if Path('transcription.txt').is_file():
+	st.markdown('### Download')
+	download_transcription()
+	os.remove('transcription.txt')
+
+# References (Code modified and adapted from the following)
+# 1. https://github.com/misraturp/Real-time-transcription-from-microphone
+# 2. https://medium.com/towards-data-science/real-time-speech-recognition-python-assemblyai-13d35eeed226
