@@ -5,15 +5,14 @@ import json
 import os
 
 # Function to call OpenRouter API
-def summarize_with_openrouter(transcript):
-    OPENROUTER_API_KEY = st.secrets["OPENROUTER_API_KEY"]
+def summarize_with_openrouter(transcript, api_key):
     YOUR_SITE_URL = "https://your-app-url.com"  # Replace with your actual URL
     YOUR_APP_NAME = "Transcription Analyzer"  # Replace with your app name
 
     response = requests.post(
         url="https://openrouter.ai/api/v1/chat/completions",
         headers={
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Authorization": f"Bearer {api_key}",
             "HTTP-Referer": YOUR_SITE_URL,
             "X-Title": YOUR_APP_NAME,
         },
@@ -30,11 +29,12 @@ def summarize_with_openrouter(transcript):
 # Streamlit app title
 st.title("Audio Transcription and Analysis with AssemblyAI and OpenRouter")
 
-# API key input
-api_key = st.text_input("Enter your AssemblyAI API key:", type="password")
+# API key inputs
+assemblyai_api_key = st.text_input("Enter your AssemblyAI API key:", type="password")
+openrouter_api_key = st.text_input("Enter your OpenRouter API key:", type="password")
 
-if api_key:
-    aai.settings.api_key = api_key
+if assemblyai_api_key and openrouter_api_key:
+    aai.settings.api_key = assemblyai_api_key
 
     # File uploader
     uploaded_file = st.file_uploader("Choose an audio file", type=["mp3", "wav", "m4a"])
@@ -128,7 +128,7 @@ if api_key:
 
                     # OpenRouter summarization
                     st.subheader("OpenRouter Summarization and Key Information")
-                    openrouter_output = summarize_with_openrouter(transcript.text)
+                    openrouter_output = summarize_with_openrouter(transcript.text, openrouter_api_key)
                     st.write(openrouter_output)
 
                     # Download button for OpenRouter output
@@ -167,7 +167,7 @@ if api_key:
                 response = requests.post(
                     url="https://openrouter.ai/api/v1/chat/completions",
                     headers={
-                        "Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}",
+                        "Authorization": f"Bearer {openrouter_api_key}",
                         "HTTP-Referer": "https://your-app-url.com",
                         "X-Title": "Transcription Analyzer",
                     },
@@ -182,7 +182,7 @@ if api_key:
                 st.write(f"AI: {ai_response}")
 
 else:
-    st.warning("Please enter your AssemblyAI API key to proceed.")
+    st.warning("Please enter both your AssemblyAI and OpenRouter API keys to proceed.")
 
 st.markdown("---")
 st.markdown("Powered by AssemblyAI and OpenRouter")
